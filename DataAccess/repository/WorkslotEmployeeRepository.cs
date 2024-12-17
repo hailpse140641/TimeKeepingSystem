@@ -303,6 +303,11 @@ namespace DataAccess.Repository
             {
                 employees = employees.Where(e => e.DepartmentId == Guid.Parse(departmentId))
                 .ToList();
+            } else
+            {
+                var avaiDepartmentId = _dbContext.Departments.Where(d => d.IsDeleted == false).Select(d => d.Id).ToList();
+                employees = employees.Where(e => e.DepartmentId != null && avaiDepartmentId.Contains((Guid)e.DepartmentId))
+                .ToList();
             }
 
             var allEmployeeResults = new List<object>();
