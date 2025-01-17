@@ -1,1 +1,1 @@
-namespace DataAccess.InterfaceRepository { public interface IRiskPerformanceEmployeeRepository { Task<bool> SoftDeleteAsync(Guid id); } }
+namespace DataAccess.InterfaceRepository { public interface IRiskPerformanceEmployeeRepository { Task<object> GetEmployeesViolatingRiskSettingForMonth(int month, int year); Task<bool> SoftDeleteAsync(Guid id); } }
