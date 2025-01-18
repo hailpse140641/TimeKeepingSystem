@@ -1081,9 +1081,9 @@ namespace DataAccess.Repository
                 else
                 {
                     var slot = workSlotsForDate.First(); // Assuming getting the first slot for simplification
-                    string status = slot.AttendanceStatus.WorkingStatus.Name == "Working" ? "No Check Out" :
+                    string status = slot.AttendanceStatus.WorkingStatus?.Name == "Working" ? "No Check Out" :
                                     slot.AttendanceStatus.LeaveTypeId.HasValue ? slot.AttendanceStatus.LeaveType.Name :
-                                    slot.AttendanceStatus.WorkingStatus.Name;
+                                    slot.AttendanceStatus.WorkingStatus?.Name;
                     results.Add(new TimeSlotDto { Date = date.ToString("yyyy-MM-dd"), Status = status });
                 }
             }
