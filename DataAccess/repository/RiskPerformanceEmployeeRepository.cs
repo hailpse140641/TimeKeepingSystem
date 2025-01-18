@@ -1,6 +1,5 @@
 ﻿using DataAccess.InterfaceRepository;
 using Microsoft.EntityFrameworkCore;
-using Newtonsoft.Json;
 
 namespace DataAccess.Repository
 {
@@ -42,84 +41,49 @@ namespace DataAccess.Repository
                 return "No active RiskPerformanceSettings found.";
             }
 
-            int requiredViolationDays = latestRiskSetting.Days; // The number of days threshold for violation
+            int lateMinuteAllow = latestRiskSetting.Hours; // Allowable late minutes before violation
+            int earlyLeaveMinuteAllow = latestRiskSetting.Days; // Allowable early leave minutes before violation
 
             // Step 2: Get all WorkslotEmployees within the selected month and year
-            var violatingEmployees = await _dbContext.WorkslotEmployees
-                .Include(we => we.Employee)
-                .Include(we => we.Workslot)
+            var workslotEmployees = await _dbContext.WorkslotEmployees
+                .Include(we => we.Employee).ThenInclude(e => e.Department) // Include Employee details
+                .Include(we => we.Workslot) // Include Workslot details
                 .Where(we => !we.IsDeleted &&
                              we.Workslot.DateOfSlot.Month == month &&
                              we.Workslot.DateOfSlot.Year == year)
                 .ToListAsync();
 
-            // Step 3: Identify violations based on check-in and check-out times
-            var employeeViolations = new Dictionary<Guid, List<(DateTime date, bool isLate, bool isEarlyLeave, string checkIn, string expectedStart, string checkOut, string expectedEnd)>>();
+            // Step 3: Identify violations based on LateMinuteAllow and EarlyLeaveMinuteAllow
+            var employeeViolations = new Dictionary<Guid, List<(DateTime date, int lateMinutes, int earlyLeaveMinutes, string checkInTime, string checkOutTime, string expectCheckIn, string expectCheckOut, bool isMorning, string teamName)>>();
 
-            foreach (var we in violatingEmployees)
+            foreach (var we in workslotEmployees)
             {
-                bool isLate = false, isEarlyLeave = false;
+                int lateMinutes = 0, earlyLeaveMinutes = 0;
+                string checkInTime = we.CheckInTime ?? "N/A";
+                string checkOutTime = we.CheckOutTime ?? "N/A";
+                string expectCheckIn = we.Workslot.FromHour ?? "N/A";
+                string expectCheckOut = we.Workslot.ToHour ?? "N/A";
+                bool isMorning = we.Workslot.IsMorning;
+                string teamName = we.Employee?.Department?.Name ?? "N/A";
 
                 if (!string.IsNullOrEmpty(we.CheckInTime) && !string.IsNullOrEmpty(we.Workslot.FromHour))
                 {
-                    isLate = TimeSpan.Parse(we.CheckInTime) > TimeSpan.Parse(we.Workslot.FromHour);
+                    lateMinutes = (int)(TimeSpan.Parse(we.CheckInTime) - TimeSpan.Parse(we.Workslot.FromHour)).TotalMinutes;
                 }
 
                 if (!string.IsNullOrEmpty(we.CheckOutTime) && !string.IsNullOrEmpty(we.Workslot.ToHour))
                 {
-                    isEarlyLeave = TimeSpan.Parse(we.CheckOutTime) < TimeSpan.Parse(we.Workslot.ToHour);
+                    earlyLeaveMinutes = (int)(TimeSpan.Parse(we.Workslot.ToHour) - TimeSpan.Parse(we.CheckOutTime)).TotalMinutes;
                 }
 
-                if (isLate || isEarlyLeave)
+                if (lateMinutes > lateMinuteAllow || earlyLeaveMinutes > earlyLeaveMinuteAllow)
                 {
                     if (!employeeViolations.ContainsKey(we.EmployeeId))
                     {
-                        employeeViolations[we.EmployeeId] = new List<(DateTime, bool, bool, string, string, string, string)>();
+                        employeeViolations[we.EmployeeId] = new List<(DateTime, int, int, string, string, string ,string, bool, string)>();
                     }
 
-                    employeeViolations[we.EmployeeId].Add((
-                        we.Workslot.DateOfSlot,
-                        isLate,
-                        isEarlyLeave,
-                        we.CheckInTime,
-                        we.Workslot.FromHour,
-                        we.CheckOutTime,
-                        we.Workslot.ToHour
-                    ));
-                }
-            }
-
-            // Step 4: Filter employees who exceed the violation threshold
-            var result = new List<object>();
-
-            foreach (var entry in employeeViolations)
-            {
-                if (entry.Value.Count >= requiredViolationDays)
-                {
-                    var violationDetails = entry.Value.Select(v => new
-                    {
-                        date = v.date.ToString("yyyy-MM-dd"),
-                        isLate = v.isLate,
-                        isEarlyLeave = v.isEarlyLeave,
-                        checkIn = v.isEarlyLeave ? "" : v.checkIn,
-                        expectedStart = v.isEarlyLeave ? "" : v.expectedStart,
-                        checkOut = v.isLate ? "" : v.checkOut,
-                        expectedEnd = v.isLate ? "" : v.expectedEnd
-                    }).ToList();
-                    var employee = _dbContext.Employees.Include(e => e.Department).Where(e => e.Id == entry.Key).FirstOrDefault();
-                    result.Add(new
-                    {
-                        EmployeeId = entry.Key,
-                        EmployeeName = employee?.FirstName + " " + employee?.LastName,
-                        Team = employee?.Department?.Name,
-                        ViolationCount = entry.Value.Count,
-                        ViolationJSON = new
-                        {
-                            violationType = "Attendance Issues",
-                            count = entry.Value.Count,
-                            timestamps = violationDetails
-                        }
-                    });
+                    employeeViolations[we.EmployeeId].Add((we.Workslot.DateOfSlot, lateMinutes, earlyLeaveMinutes, checkInTime, checkOutTime, expectCheckIn, expectCheckOut, isMorning, teamName));
                 }
             }
 
@@ -130,13 +94,34 @@ namespace DataAccess.Repository
                 LatestRiskSetting = new
                 {
                     latestRiskSetting.Id,
-                    latestRiskSetting.Hours,
-                    latestRiskSetting.Days,
+                    LateMinutesAllow = latestRiskSetting.Hours,
+                    EarlyLeaveMinutesAllow = latestRiskSetting.Days,
                     latestRiskSetting.DateSet
                 },
-                ViolatingEmployees = result
+                ViolatingEmployees = employeeViolations.Select(ev => new
+                {
+                    EmployeeId = ev.Key,
+                    EmployeeName = workslotEmployees
+                        .Where(we => we.EmployeeId == ev.Key)
+                        .Select(we => we.Employee.FirstName + " " + we.Employee.LastName)
+                        .FirstOrDefault(),
+                    Team = ev.Value.FirstOrDefault().teamName, 
+                    Violations = ev.Value.Select(v => new
+                    {
+                        Date = v.date.ToString("dd-MM-yyyy"),
+                        LateMinutes = v.lateMinutes > lateMinuteAllow ? v.lateMinutes : 0,
+                        EarlyLeaveMinutes = v.earlyLeaveMinutes > earlyLeaveMinuteAllow ? v.earlyLeaveMinutes : 0,
+                        CheckInTime = v.isMorning ? v.checkInTime : "N/A",
+                        ExpectCheckIn = v.isMorning ? v.expectCheckIn : "N/A",
+                        CheckOutTime = v.isMorning ? "N/A" : v.checkOutTime,
+                        ExpectCheckOut = v.isMorning ? "N/A" : v.expectCheckOut
+                    }).ToList()
+                })
             };
         }
+
+
+
 
     }
 }
