@@ -54,7 +54,7 @@ namespace DataAccess.Repository
                 .ToListAsync();
 
             // Step 3: Identify violations based on LateMinuteAllow and EarlyLeaveMinuteAllow
-            var employeeViolations = new Dictionary<Guid, List<(DateTime date, int lateMinutes, int earlyLeaveMinutes, string checkInTime, string checkOutTime, string expectCheckIn, string expectCheckOut, bool isMorning, string teamName)>>();
+            var employeeViolations = new Dictionary<Guid, List<(DateTime date, int lateMinutes, int earlyLeaveMinutes, string checkInTime, string checkOutTime, string expectCheckIn, string expectCheckOut, bool isMorning, string teamName, string teamId)>>();
 
             foreach (var we in workslotEmployees)
             {
@@ -65,6 +65,7 @@ namespace DataAccess.Repository
                 string expectCheckOut = we.Workslot.ToHour ?? "N/A";
                 bool isMorning = we.Workslot.IsMorning;
                 string teamName = we.Employee?.Department?.Name ?? "N/A";
+                string teamId = we.Employee?.Department?.Id.ToString() ?? "N/A";
 
                 if (!string.IsNullOrEmpty(we.CheckInTime) && !string.IsNullOrEmpty(we.Workslot.FromHour))
                 {
@@ -80,10 +81,10 @@ namespace DataAccess.Repository
                 {
                     if (!employeeViolations.ContainsKey(we.EmployeeId))
                     {
-                        employeeViolations[we.EmployeeId] = new List<(DateTime, int, int, string, string, string ,string, bool, string)>();
+                        employeeViolations[we.EmployeeId] = new List<(DateTime, int, int, string, string, string ,string, bool, string, string)>();
                     }
 
-                    employeeViolations[we.EmployeeId].Add((we.Workslot.DateOfSlot, lateMinutes, earlyLeaveMinutes, checkInTime, checkOutTime, expectCheckIn, expectCheckOut, isMorning, teamName));
+                    employeeViolations[we.EmployeeId].Add((we.Workslot.DateOfSlot, lateMinutes, earlyLeaveMinutes, checkInTime, checkOutTime, expectCheckIn, expectCheckOut, isMorning, teamName, teamId));
                 }
             }
 
@@ -105,7 +106,8 @@ namespace DataAccess.Repository
                         .Where(we => we.EmployeeId == ev.Key)
                         .Select(we => we.Employee.FirstName + " " + we.Employee.LastName)
                         .FirstOrDefault(),
-                    Team = ev.Value.FirstOrDefault().teamName, 
+                    TeamId = ev.Value.FirstOrDefault().teamId, 
+                    TeamName = ev.Value.FirstOrDefault().teamName, 
                     Violations = ev.Value.Select(v => new
                     {
                         Date = v.date.ToString("dd-MM-yyyy"),
@@ -119,9 +121,5 @@ namespace DataAccess.Repository
                 })
             };
         }
-
-
-
-
     }
 }
